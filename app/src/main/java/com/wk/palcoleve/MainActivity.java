@@ -68,6 +68,7 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
     private Spinner bankSpinner;
     private Spinner presetSpinner;
     private Button audioButton;
+    private Button demoButton;
     private MidiInputManager midiInput;
     private AudioManager audioManager;
     private final AudioManager.OnAudioFocusChangeListener focusListener = focusChange -> {
@@ -81,6 +82,7 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
     private boolean audioRunning;
     private boolean banksReady;
     private boolean presetsReady;
+    private int demoGeneration;
     private final List<SoundFontEntry> folderBanks = new ArrayList<>();
 
     private final Runnable statusUpdater = new Runnable() {
@@ -249,6 +251,10 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
             return true;
         });
         performance.addView(test, weighted(1));
+
+        demoButton = button("OUVIR HINO", CARD, ACCENT);
+        demoButton.setOnClickListener(v -> toggleHymnDemo());
+        performance.addView(demoButton, fixed(150));
 
         audioButton = button("INICIAR ÁUDIO", ACCENT, Color.rgb(7, 35, 29));
         audioButton.setOnClickListener(v -> toggleAudio());
@@ -436,9 +442,66 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
     }
 
     private void changeTranspose(int delta) {
+        stopHymnDemo();
         nativePanic();
         transpose = Math.max(-24, Math.min(24, transpose + delta));
         transposeValue.setText("TRANSPOSE  " + (transpose > 0 ? "+" : "") + transpose);
+    }
+
+    private void toggleHymnDemo() {
+        if (demoButton.getText().toString().contains("PARAR")) {
+            stopHymnDemo();
+            return;
+        }
+        if (!audioRunning) startAudio();
+        if (!audioRunning) return;
+
+        nativePanic();
+        final int generation = ++demoGeneration;
+        demoButton.setText("PARAR HINO");
+
+        // "When the Saints Go Marching In", spiritual tradicional em domínio público.
+        final int[] notes = {
+                60, 64, 65, 67,
+                60, 64, 65, 67,
+                60, 64, 65, 67, 64, 60, 64, 62,
+                64, 64, 62, 60, 60, 64, 67, 67, 65,
+                65, 64, 65, 67, 64, 60, 62, 60
+        };
+        final int[] beats = {
+                1, 1, 1, 4,
+                1, 1, 1, 4,
+                1, 1, 1, 2, 2, 2, 2, 4,
+                2, 1, 1, 2, 1, 1, 2, 1, 4,
+                2, 1, 1, 2, 2, 2, 2, 4
+        };
+
+        long positionMs = 250L;
+        final int beatMs = 300;
+        for (int i = 0; i < notes.length; ++i) {
+            final int note = notes[i];
+            final int velocity = (i == 0 || i == 4 || i == 8) ? 112 : 96;
+            final long noteStart = positionMs;
+            final long noteLength = Math.max(120L, beats[i] * beatMs - 45L);
+            handler.postDelayed(() -> {
+                if (generation == demoGeneration) nativeNoteOn(0, note, velocity);
+            }, noteStart);
+            handler.postDelayed(() -> {
+                if (generation == demoGeneration) nativeNoteOff(0, note);
+            }, noteStart + noteLength);
+            positionMs += (long) beats[i] * beatMs;
+        }
+        handler.postDelayed(() -> {
+            if (generation != demoGeneration) return;
+            nativePanic();
+            demoButton.setText("OUVIR HINO");
+        }, positionMs + 600L);
+    }
+
+    private void stopHymnDemo() {
+        ++demoGeneration;
+        nativePanic();
+        if (demoButton != null) demoButton.setText("OUVIR HINO");
     }
 
     private void requestAudioFocus() {
@@ -490,7 +553,7 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
     protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
         if (midiInput != null) midiInput.stop();
-        nativePanic();
+        stopHymnDemo();
         nativeStop();
         worker.shutdownNow();
         abandonAudioFocus();

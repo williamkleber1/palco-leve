@@ -14,6 +14,7 @@
 - 11 bancos do Audio Evolution catalogados automaticamente;
 - `07Hillsong Pad.sf2` (aproximadamente 37 MB) carregado e tocado com zero xruns;
 - memória com `07Hillsong Pad.sf2`: aproximadamente 106 MB PSS;
+- demonstração de “When the Saints Go Marching In” validada com até 6 vozes e zero xruns;
 - teclado MIDI físico ainda não validado.
 
 As medições variam conforme tamanho e complexidade do banco SF2, quantidade de
