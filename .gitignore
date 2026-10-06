@@ -1,0 +1,12 @@
+.DS_Store
+.gradle/
+.idea/
+local.properties
+manual-build/
+dist/
+*.apk
+*.aab
+*.keystore
+*.jks
+*.iml
+palco-leve.keystore
