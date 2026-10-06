@@ -63,8 +63,8 @@ TSF_INCLUDE="$PROJECT_DIR/third_party/TinySoundFont"
   --java "$BUILD_DIR/generated" \
   --min-sdk-version 26 \
   --target-sdk-version 29 \
-  --version-code 7 \
-  --version-name 0.6.1 \
+  --version-code 8 \
+  --version-name 0.6.2 \
   "$BUILD_DIR/resources.zip"
 
 find "$PROJECT_DIR/app/src/main/java" "$BUILD_DIR/generated" -name '*.java' -print \
@@ -109,8 +109,8 @@ fi
   --ks-key-alias palcoleve \
   --ks-pass pass:palcoleve \
   --key-pass pass:palcoleve \
-  --out "$OUTPUT_DIR/Palco-Leve-0.6.1.apk" \
+  --out "$OUTPUT_DIR/Palco-Leve-0.6.2.apk" \
   "$BUILD_DIR/palco-leve-aligned.apk"
 
-"$BUILD_TOOLS/apksigner" verify --verbose "$OUTPUT_DIR/Palco-Leve-0.6.1.apk"
-ls -lh "$OUTPUT_DIR/Palco-Leve-0.6.1.apk"
+"$BUILD_TOOLS/apksigner" verify --verbose "$OUTPUT_DIR/Palco-Leve-0.6.2.apk"
+ls -lh "$OUTPUT_DIR/Palco-Leve-0.6.2.apk"

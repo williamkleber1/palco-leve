@@ -23,6 +23,8 @@
 namespace {
 
 constexpr int TrackCount = 5;
+constexpr int FullVoicesPerTrack = 32;
+constexpr int SafeVoicesPerTrack = 24;
 
 enum class EventType : uint8_t {
     NoteOn, NoteOff, Control, Pitch, TrackPreset,
@@ -65,7 +67,7 @@ public:
         }
 
         tsf_set_output(candidate, TSF_STEREO_INTERLEAVED, 48000, -6.0f);
-        if (!tsf_set_max_voices(candidate, 32)) {
+        if (!tsf_set_max_voices(candidate, FullVoicesPerTrack)) {
             tsf_close(candidate);
             lastError_ = "Memória insuficiente para preparar as vozes";
             return 0;
@@ -134,6 +136,8 @@ public:
 
         sampleRate_ = AAudioStream_getSampleRate(stream_);
         framesPerBurst_ = AAudioStream_getFramesPerBurst(stream_);
+        voiceLimit_.store(FullVoicesPerTrack, std::memory_order_relaxed);
+        lastObservedXruns_ = 0;
         for (Track& track : tracks_) {
             if (track.synth) {
                 tsf_set_output(track.synth, TSF_STEREO_INTERLEAVED, sampleRate_, -6.0f);
@@ -217,12 +221,21 @@ public:
             return "Áudio interrompido • toque em iniciar";
         }
         const int32_t buffer = AAudioStream_getBufferSizeInFrames(stream_);
-        const int32_t xruns = AAudioStream_getXRunCount(stream_);
+        const int32_t xruns = std::max(0, AAudioStream_getXRunCount(stream_));
+        if (xruns > lastObservedXruns_ &&
+            voiceLimit_.load(std::memory_order_relaxed) > SafeVoicesPerTrack) {
+            voiceLimit_.store(SafeVoicesPerTrack, std::memory_order_relaxed);
+            LOGI("Modo adaptativo: %d falhas, limite reduzido para %d vozes por camada",
+                 xruns, SafeVoicesPerTrack);
+        }
+        lastObservedXruns_ = xruns;
         const int voices = activeVoices_.load(std::memory_order_relaxed);
+        const int voiceLimit = voiceLimit_.load(std::memory_order_relaxed);
         return std::to_string(sampleRate_) + " Hz • buffer "
                 + std::to_string(buffer) + " • falhas "
-                + std::to_string(std::max(0, xruns)) + " • camadas "
-                + std::to_string(loaded) + " • vozes " + std::to_string(voices);
+                + std::to_string(xruns) + " • camadas "
+                + std::to_string(loaded) + " • vozes " + std::to_string(voices)
+                + " • auto " + std::to_string(voiceLimit);
     }
 
 private:
@@ -294,8 +307,11 @@ private:
                 for (Track& track : tracks_) {
                     if (track.synth && track.enabled) {
                         const float velocity = event.b / 127.0f;
-                        palco_prepare_voice_slots(track.synth, event.channel, event.a, velocity);
+                        const int voiceLimit = voiceLimit_.load(std::memory_order_relaxed);
+                        palco_prepare_voice_slots(
+                                track.synth, event.channel, event.a, velocity, voiceLimit);
                         tsf_channel_note_on(track.synth, event.channel, event.a, velocity);
+                        palco_trim_voice_count(track.synth, voiceLimit);
                     }
                 }
                 break;
@@ -400,9 +416,11 @@ private:
     std::atomic<uint32_t> writeIndex_{0};
     std::atomic<bool> running_{false};
     std::atomic<int> activeVoices_{0};
+    std::atomic<int> voiceLimit_{FullVoicesPerTrack};
     float masterVolume_ = 0.8f;
     int32_t sampleRate_ = 0;
     int32_t framesPerBurst_ = 0;
+    int32_t lastObservedXruns_ = 0;
 };
 
 jstring toJString(JNIEnv* env, const std::string& value) {
