@@ -10,6 +10,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -26,11 +27,14 @@ import android.widget.ToggleButton;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity implements MidiInputManager.Listener {
     private static final int PICK_SF2 = 1001;
+    private static final int PICK_SF2_FOLDER = 1002;
     private static final int BG = Color.rgb(11, 16, 22);
     private static final int CARD = Color.rgb(21, 29, 38);
     private static final int PRIMARY = Color.rgb(244, 248, 250);
@@ -61,6 +65,7 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
     private TextView midiStatus;
     private TextView bankName;
     private TextView transposeValue;
+    private Spinner bankSpinner;
     private Spinner presetSpinner;
     private Button audioButton;
     private MidiInputManager midiInput;
@@ -74,7 +79,9 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
     private int transpose;
     private float currentVolume = 0.8f;
     private boolean audioRunning;
+    private boolean banksReady;
     private boolean presetsReady;
+    private final List<SoundFontEntry> folderBanks = new ArrayList<>();
 
     private final Runnable statusUpdater = new Runnable() {
         @Override public void run() {
@@ -101,6 +108,8 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
         if (lastPath != null && new File(lastPath).isFile()) {
             loadBank(new File(lastPath), false);
         }
+        String folderUri = getPreferences(MODE_PRIVATE).getString("sf2_folder_uri", null);
+        if (folderUri != null) scanSoundFontFolder(Uri.parse(folderUri));
     }
 
     private void buildInterface() {
@@ -126,10 +135,41 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
         root.addView(connection, matchWrap());
 
         LinearLayout bankRow = horizontal();
-        Button load = button("Carregar SF2", ACCENT, Color.rgb(7, 35, 29));
+        Button load = button("SF2 avulso", ACCENT, Color.rgb(7, 35, 29));
         load.setOnClickListener(v -> chooseSoundFont());
-        bankRow.addView(load, fixed(160));
+        bankRow.addView(load, fixed(135));
 
+        Button folder = button("Pasta SF2", CARD, PRIMARY);
+        folder.setOnClickListener(v -> chooseSoundFontFolder());
+        bankRow.addView(folder, fixed(135));
+
+        bankSpinner = new Spinner(this);
+        bankSpinner.setBackground(rounded(CARD, 12));
+        bankSpinner.setPadding(dp(14), 0, dp(14), 0);
+        bankSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent,
+                                                  View view, int position, long id) {
+                if (!banksReady || position <= 0 || position > folderBanks.size()) return;
+                SoundFontEntry selected = folderBanks.get(position - 1);
+                importSoundFont(selected.uri, selected.name);
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+        });
+        ArrayAdapter<String> emptyBanks = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item,
+                new String[] { "Selecione uma pasta de SF2" });
+        emptyBanks.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        bankSpinner.setAdapter(emptyBanks);
+        LinearLayout.LayoutParams bankParams = weighted(1);
+        bankParams.height = dp(48);
+        bankParams.setMargins(dp(8), dp(5), 0, dp(5));
+        bankRow.addView(bankSpinner, bankParams);
+        root.addView(bankRow, matchWrap());
+
+        LinearLayout presetRow = horizontal();
+        TextView presetLabel = pill("TIMBRE", SECONDARY);
+        presetLabel.setGravity(Gravity.CENTER);
+        presetRow.addView(presetLabel, fixed(100));
         presetSpinner = new Spinner(this);
         presetSpinner.setBackground(rounded(CARD, 12));
         presetSpinner.setPadding(dp(14), 0, dp(14), 0);
@@ -143,8 +183,8 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
         LinearLayout.LayoutParams spinnerParams = weighted(1);
         spinnerParams.height = dp(48);
         spinnerParams.setMargins(dp(10), dp(5), 0, dp(5));
-        bankRow.addView(presetSpinner, spinnerParams);
-        root.addView(bankRow, matchWrap());
+        presetRow.addView(presetSpinner, spinnerParams);
+        root.addView(presetRow, matchWrap());
 
         LinearLayout controls = horizontal();
         Button down = button("−", CARD, PRIMARY);
@@ -234,17 +274,40 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
         startActivityForResult(intent, PICK_SF2);
     }
 
+    private void chooseSoundFontFolder() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        startActivityForResult(intent, PICK_SF2_FOLDER);
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != PICK_SF2 || resultCode != RESULT_OK || data == null) return;
+        if (resultCode != RESULT_OK || data == null) return;
         Uri uri = data.getData();
         if (uri == null) return;
-        importSoundFont(uri);
+        if (requestCode == PICK_SF2) {
+            importSoundFont(uri);
+        } else if (requestCode == PICK_SF2_FOLDER) {
+            int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            try {
+                getContentResolver().takePersistableUriPermission(uri, flags);
+            } catch (SecurityException ignored) { }
+            getPreferences(MODE_PRIVATE).edit()
+                    .putString("sf2_folder_uri", uri.toString()).apply();
+            scanSoundFontFolder(uri);
+        }
     }
 
     private void importSoundFont(Uri uri) {
-        String displayName = queryName(uri);
+        importSoundFont(uri, queryName(uri));
+    }
+
+    private void importSoundFont(Uri uri, String sourceName) {
+        String displayName = sourceName;
         if (!displayName.toLowerCase().endsWith(".sf2")) displayName += ".sf2";
         String safeName = displayName.replaceAll("[^A-Za-z0-9._ -]", "_");
         File directory = getExternalFilesDir("soundfonts");
@@ -267,6 +330,62 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
                 runOnUiThread(() -> engineStatus.setText("Falha ao importar: " + error.getMessage()));
             }
         });
+    }
+
+    private void scanSoundFontFolder(Uri treeUri) {
+        banksReady = false;
+        bankName.setText("Lendo pasta de SF2…");
+        worker.execute(() -> {
+            List<SoundFontEntry> found = new ArrayList<>();
+            try {
+                String treeId = DocumentsContract.getTreeDocumentId(treeUri);
+                Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, treeId);
+                String[] columns = {
+                        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                        DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                        DocumentsContract.Document.COLUMN_MIME_TYPE
+                };
+                try (Cursor cursor = getContentResolver().query(
+                        children, columns, null, null,
+                        DocumentsContract.Document.COLUMN_DISPLAY_NAME + " ASC")) {
+                    if (cursor != null) {
+                        while (cursor.moveToNext()) {
+                            String id = cursor.getString(0);
+                            String name = cursor.getString(1);
+                            String mime = cursor.getString(2);
+                            if (DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)
+                                    || name == null || !name.toLowerCase().endsWith(".sf2")) {
+                                continue;
+                            }
+                            Uri document = DocumentsContract.buildDocumentUriUsingTree(treeUri, id);
+                            found.add(new SoundFontEntry(name, document));
+                        }
+                    }
+                }
+                found.sort((left, right) -> left.name.compareToIgnoreCase(right.name));
+                runOnUiThread(() -> showFolderBanks(found));
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    banksReady = false;
+                    bankName.setText("Pasta SF2 indisponível");
+                    engineStatus.setText("Escolha a pasta novamente");
+                });
+            }
+        });
+    }
+
+    private void showFolderBanks(List<SoundFontEntry> found) {
+        folderBanks.clear();
+        folderBanks.addAll(found);
+        List<String> labels = new ArrayList<>();
+        labels.add(found.isEmpty() ? "Nenhum SF2 nesta pasta" : "Escolha um banco (" + found.size() + ")");
+        for (SoundFontEntry entry : found) labels.add(entry.name);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, labels);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        bankSpinner.setAdapter(adapter);
+        banksReady = true;
+        bankName.setText(found.size() + " bancos disponíveis");
     }
 
     private void loadBank(File file, boolean alreadyOnWorker) {
@@ -447,5 +566,15 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
     private int clampMidi(int value) { return Math.max(0, Math.min(127, value)); }
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private static final class SoundFontEntry {
+        final String name;
+        final Uri uri;
+
+        SoundFontEntry(String name, Uri uri) {
+            this.name = name;
+            this.uri = uri;
+        }
     }
 }
