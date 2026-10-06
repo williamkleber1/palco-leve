@@ -22,6 +22,7 @@ O objetivo é iniciar rápido, manter baixa latência e oferecer somente os cont
 ## Princípios técnicos
 
 - até cinco SoundFonts carregadas, com 32 vozes por camada e ganho normalizado;
+- roubo de voz previsível: notas novas substituem primeiro as vozes mais antigas quando a camada atinge o limite;
 - callback de áudio nativo sem alocações, bloqueios ou acesso a disco;
 - fila MIDI sem bloqueio no lado do áudio;
 - stream AAudio de baixa latência, com modo exclusivo e fallback compartilhado;
@@ -37,7 +38,7 @@ durante o desenvolvimento, instale Android SDK 35, Build Tools 35.0.0, NDK
 ./build-manual.sh
 ```
 
-O APK assinado para testes locais será criado em `dist/Palco-Leve-0.6.0.apk`.
+O APK assinado para testes locais será criado em `dist/Palco-Leve-0.6.1.apk`.
 A chave gerada é apenas de desenvolvimento e fica fora do Git.
 
 Os resultados dos testes em hardware ficam em

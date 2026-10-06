@@ -14,6 +14,7 @@
 
 #define TSF_IMPLEMENTATION
 #include "tsf.h"
+#include "voice-stealing.h"
 
 #define LOG_TAG "PalcoLeve"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
@@ -292,8 +293,9 @@ private:
             case EventType::NoteOn:
                 for (Track& track : tracks_) {
                     if (track.synth && track.enabled) {
-                        tsf_channel_note_on(track.synth, event.channel,
-                                            event.a, event.b / 127.0f);
+                        const float velocity = event.b / 127.0f;
+                        palco_prepare_voice_slots(track.synth, event.channel, event.a, velocity);
+                        tsf_channel_note_on(track.synth, event.channel, event.a, velocity);
                     }
                 }
                 break;
