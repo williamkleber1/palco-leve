@@ -28,6 +28,23 @@ O objetivo é iniciar rápido, manter baixa latência e oferecer somente os cont
 - stream AAudio de baixa latência, com modo exclusivo e fallback compartilhado;
 - suporte a Android 8.0 ou superior em `arm64-v8a` e `armeabi-v7a`.
 
+## Indicador do motor
+
+O cabeçalho mostra uma linha semelhante a:
+
+```text
+48000 Hz • buffer 512 • falhas 0 • camadas 5 • vozes 86 • auto 32
+```
+
+- `falhas` é o contador de underruns do stream AAudio atual;
+- `vozes` é a soma das vozes ativas nas camadas ligadas;
+- `auto 32` indica o limite normal por camada;
+- `auto 24` indica que o modo adaptativo detectou uma falha e reduziu a
+  polifonia para proteger a continuidade do áudio.
+
+O limite volta para 32 quando o stream de áudio é reiniciado. A explicação
+completa do algoritmo está em [`docs/AUDIO_ENGINE.md`](docs/AUDIO_ENGINE.md).
+
 ## Compilar
 
 O projeto abre normalmente no Android Studio. Para a compilação local mínima usada
@@ -35,6 +52,7 @@ durante o desenvolvimento, instale Android SDK 35, Build Tools 35.0.0, NDK
 27.2.12479018 e JDK 17, e execute:
 
 ```sh
+git submodule update --init --recursive
 ./build-manual.sh
 ```
 
@@ -43,6 +61,15 @@ A chave gerada é apenas de desenvolvimento e fica fora do Git.
 
 Os resultados dos testes em hardware ficam em
 [`docs/TESTED_DEVICES.md`](docs/TESTED_DEVICES.md).
+
+O teste nativo da política de vozes pode ser executado no macOS ou Linux com:
+
+```sh
+clang++ -std=c++17 -O2 \
+  -I third_party/TinySoundFont -I app/src/main/cpp \
+  tests/voice_stealing_test.cpp -o /tmp/palco-leve-voice-test
+/tmp/palco-leve-voice-test third_party/TinySoundFont/examples/florestan-subset.sf2
+```
 
 ## Dependência
 
