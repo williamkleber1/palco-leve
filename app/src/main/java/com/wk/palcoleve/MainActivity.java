@@ -82,6 +82,7 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
     private TextView inspectorTitle;
     private Button audioButton;
     private Button demoButton;
+    private Button stressButton;
     private MidiInputManager midiInput;
     private AudioManager audioManager;
     private final AudioManager.OnAudioFocusChangeListener focusListener = focusChange -> {
@@ -319,7 +320,16 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
 
         demoButton = button("OUVIR HINO", CARD, ACCENT);
         demoButton.setOnClickListener(v -> toggleHymnDemo());
-        inspector.addView(demoButton, matchWrap());
+        stressButton = button("TESTE COMPLEXO", Color.rgb(33, 42, 60), PRIMARY);
+        stressButton.setOnClickListener(v -> toggleComplexDemo());
+        LinearLayout demos = horizontal();
+        LinearLayout.LayoutParams demoParams = weighted(1);
+        demoParams.setMargins(dp(2), dp(4), dp(2), dp(4));
+        demos.addView(demoButton, demoParams);
+        LinearLayout.LayoutParams stressParams = weighted(1);
+        stressParams.setMargins(dp(2), dp(4), dp(2), dp(4));
+        demos.addView(stressButton, stressParams);
+        inspector.addView(demos, matchWrap());
 
         audioButton = button("INICIAR ÁUDIO", ACCENT, Color.rgb(7, 35, 29));
         audioButton.setOnClickListener(v -> toggleAudio());
@@ -825,6 +835,7 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
             stopHymnDemo();
             return;
         }
+        stopHymnDemo();
         if (!audioRunning) startAudio();
         if (!audioRunning) return;
 
@@ -870,10 +881,97 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
         }, positionMs + 600L);
     }
 
+    private void toggleComplexDemo() {
+        if (stressButton.getText().toString().contains("PARAR")) {
+            stopHymnDemo();
+            return;
+        }
+        stopHymnDemo();
+        if (!audioRunning) startAudio();
+        if (!audioRunning) return;
+
+        final int generation = ++demoGeneration;
+        stressButton.setText("PARAR TESTE");
+        nativePanic();
+
+        // Arranjo gospel original: acordes, baixo, arpejo e melodia concorrentes.
+        final int[][] chords = {
+                {48, 55, 59, 62, 64}, // Cmaj9
+                {45, 52, 55, 59, 60}, // Am9
+                {41, 48, 52, 55, 57}, // Fmaj9
+                {43, 50, 55, 60, 62}, // Gsus4
+                {48, 55, 59, 62, 64},
+                {45, 52, 55, 59, 64}, // Am11
+                {41, 48, 52, 57, 60}, // Fmaj9/A
+                {43, 50, 55, 59, 62}  // G
+        };
+        final int[][] arpeggios = {
+                {60, 64, 67, 71, 72, 71, 67, 64},
+                {57, 60, 64, 67, 69, 67, 64, 60},
+                {53, 57, 60, 64, 65, 64, 60, 57},
+                {55, 60, 62, 67, 69, 67, 62, 60},
+                {60, 64, 67, 71, 74, 71, 67, 64},
+                {57, 60, 64, 67, 72, 69, 67, 64},
+                {53, 57, 60, 64, 69, 64, 60, 57},
+                {55, 59, 62, 67, 71, 67, 62, 59}
+        };
+        final int[][] melodies = {
+                {76, 79, 81, 79},
+                {76, 72, 74, 76},
+                {77, 76, 74, 72},
+                {74, 79, 77, 74},
+                {76, 79, 84, 83},
+                {81, 79, 76, 74},
+                {77, 81, 79, 76},
+                {74, 71, 72, 72}
+        };
+
+        final long startMs = 300L;
+        final int eighthMs = 300;
+        final int barMs = eighthMs * 8;
+        for (int bar = 0; bar < chords.length; ++bar) {
+            long barStart = startMs + (long) bar * barMs;
+            for (int note : chords[bar]) {
+                scheduleDemoNote(generation, note, 52, barStart, barMs - 90L);
+            }
+            for (int step = 0; step < arpeggios[bar].length; ++step) {
+                scheduleDemoNote(generation, arpeggios[bar][step], 66,
+                        barStart + (long) step * eighthMs, eighthMs - 45L);
+            }
+            for (int beat = 0; beat < melodies[bar].length; ++beat) {
+                scheduleDemoNote(generation, melodies[bar][beat],
+                        beat == 0 ? 102 : 90,
+                        barStart + (long) beat * eighthMs * 2,
+                        eighthMs * 2 - 70L);
+            }
+        }
+
+        long ending = startMs + (long) chords.length * barMs;
+        for (int note : new int[] {48, 55, 60, 64, 67, 72}) {
+            scheduleDemoNote(generation, note, 76, ending, 1800L);
+        }
+        handler.postDelayed(() -> {
+            if (generation != demoGeneration) return;
+            nativePanic();
+            stressButton.setText("TESTE COMPLEXO");
+        }, ending + 2100L);
+    }
+
+    private void scheduleDemoNote(int generation, int note, int velocity,
+                                  long startMs, long durationMs) {
+        handler.postDelayed(() -> {
+            if (generation == demoGeneration) nativeNoteOn(0, note, velocity);
+        }, startMs);
+        handler.postDelayed(() -> {
+            if (generation == demoGeneration) nativeNoteOff(0, note);
+        }, startMs + durationMs);
+    }
+
     private void stopHymnDemo() {
         ++demoGeneration;
         nativePanic();
         if (demoButton != null) demoButton.setText("OUVIR HINO");
+        if (stressButton != null) stressButton.setText("TESTE COMPLEXO");
     }
 
     private void requestAudioFocus() {

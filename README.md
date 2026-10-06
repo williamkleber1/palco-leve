@@ -15,6 +15,7 @@ O objetivo é iniciar rápido, manter baixa latência e oferecer somente os cont
 - catálogo de SF2 de uma pasta autorizada, incluindo a pasta do Audio Evolution;
 - transpose, volume, sustain e pânico;
 - demonstração musical com um spiritual tradicional em domínio público;
+- arranjo gospel original para teste de polifonia e desempenho das cinco tracks;
 - diagnóstico de stream, latência e underruns;
 - funcionamento offline, sem anúncios ou telemetria.
 
@@ -36,7 +37,7 @@ durante o desenvolvimento, instale Android SDK 35, Build Tools 35.0.0, NDK
 ./build-manual.sh
 ```
 
-O APK assinado para testes locais será criado em `dist/Palco-Leve-0.5.0.apk`.
+O APK assinado para testes locais será criado em `dist/Palco-Leve-0.6.0.apk`.
 A chave gerada é apenas de desenvolvimento e fica fora do Git.
 
 Os resultados dos testes em hardware ficam em

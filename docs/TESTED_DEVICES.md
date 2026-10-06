@@ -19,6 +19,11 @@
   Hillsong Pad e Ambient Pad;
 - cinco tracks: aproximadamente 442 MB PSS, 22 vozes durante a demonstração e zero xruns;
 - interface em tracks e seleção direta de SoundFont por track validadas em 1280 × 800;
+- arranjo gospel complexo com acordes, baixo, arpejo e melodia validado nas cinco tracks;
+- conjunto pesado incluindo `04Nord Grand Imperial.sf2`: aproximadamente 587 MB PSS;
+- pico instrumentado observado: 44 vozes e aproximadamente 31% de CPU do processo;
+- passe limpo do arranjo completo: zero xruns; a coleta simultânea de diagnóstico
+  provocou 3 xruns e por isso não representa o uso normal;
 - teclado MIDI físico ainda não validado.
 
 As medições variam conforme tamanho e complexidade do banco SF2, quantidade de
