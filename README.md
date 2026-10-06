@@ -35,6 +35,9 @@ durante o desenvolvimento, instale Android SDK 35, Build Tools 35.0.0, NDK
 O APK assinado para testes locais será criado em `dist/Palco-Leve-0.1.0.apk`.
 A chave gerada é apenas de desenvolvimento e fica fora do Git.
 
+Os resultados dos testes em hardware ficam em
+[`docs/TESTED_DEVICES.md`](docs/TESTED_DEVICES.md).
+
 ## Dependência
 
 [TinySoundFont](https://github.com/schellingb/TinySoundFont) é incluído como
