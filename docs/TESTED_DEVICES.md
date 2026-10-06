@@ -5,7 +5,7 @@
 - Android 10;
 - ABI usada: `arm64-v8a`;
 - tela física: 1280 × 800 em modo paisagem;
-- APK 0.2.0: aproximadamente 305 KB;
+- APK 0.5.0: aproximadamente 313 KB;
 - memória sem SF2: aproximadamente 32,8 MB PSS;
 - memória com o SF2 de teste de 532 KB: aproximadamente 33–34 MB PSS;
 - stream AAudio: 48 kHz, buffer de 512 frames e zero xruns no teste inicial;
@@ -15,6 +15,10 @@
 - `07Hillsong Pad.sf2` (aproximadamente 37 MB) carregado e tocado com zero xruns;
 - memória com `07Hillsong Pad.sf2`: aproximadamente 106 MB PSS;
 - demonstração de “When the Saints Go Marching In” validada com até 6 vozes e zero xruns;
+- cinco tracks simultâneas validadas com Bells Pad, Shimmer Pad, GeneralUser,
+  Hillsong Pad e Ambient Pad;
+- cinco tracks: aproximadamente 442 MB PSS, 22 vozes durante a demonstração e zero xruns;
+- interface em tracks e seleção direta de SoundFont por track validadas em 1280 × 800;
 - teclado MIDI físico ainda não validado.
 
 As medições variam conforme tamanho e complexidade do banco SF2, quantidade de

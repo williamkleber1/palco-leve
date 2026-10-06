@@ -1,6 +1,7 @@
 package com.wk.palcoleve;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Color;
@@ -33,6 +34,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity implements MidiInputManager.Listener {
+    private static final int TRACK_COUNT = 5;
     private static final int PICK_SF2 = 1001;
     private static final int PICK_SF2_FOLDER = 1002;
     private static final int BG = Color.rgb(11, 16, 22);
@@ -46,16 +48,18 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
         System.loadLibrary("palcoleve");
     }
 
-    private static native int nativeLoadSoundFont(String path);
-    private static native String[] nativeGetPresetNames();
+    private static native int nativeLoadSoundFont(int track, String path);
+    private static native String[] nativeGetPresetNames(int track);
     private static native boolean nativeStart();
     private static native void nativeStop();
     private static native void nativeNoteOn(int channel, int note, int velocity);
     private static native void nativeNoteOff(int channel, int note);
     private static native void nativeControlChange(int channel, int controller, int value);
     private static native void nativePitchBend(int channel, int value);
-    private static native void nativeSetPreset(int preset);
+    private static native void nativeSetPreset(int track, int preset);
     private static native void nativeSetVolume(float volume);
+    private static native void nativeSetTrackVolume(int track, float volume);
+    private static native void nativeSetTrackEnabled(int track, boolean enabled);
     private static native void nativePanic();
     private static native String nativeGetStatus();
 
@@ -67,6 +71,15 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
     private TextView transposeValue;
     private Spinner bankSpinner;
     private Spinner presetSpinner;
+    private ToggleButton trackToggle;
+    private SeekBar trackVolumeSeek;
+    private final Button[] trackButtons = new Button[TRACK_COUNT];
+    private final LinearLayout[] trackRows = new LinearLayout[TRACK_COUNT];
+    private final TextView[] trackBankLabels = new TextView[TRACK_COUNT];
+    private final TextView[] trackPresetLabels = new TextView[TRACK_COUNT];
+    private final ToggleButton[] trackOnButtons = new ToggleButton[TRACK_COUNT];
+    private final SeekBar[] trackLevelBars = new SeekBar[TRACK_COUNT];
+    private TextView inspectorTitle;
     private Button audioButton;
     private Button demoButton;
     private MidiInputManager midiInput;
@@ -82,8 +95,16 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
     private boolean audioRunning;
     private boolean banksReady;
     private boolean presetsReady;
+    private boolean refreshingTrackUi;
+    private boolean suppressBankSelection;
     private int demoGeneration;
+    private int selectedTrack;
     private final List<SoundFontEntry> folderBanks = new ArrayList<>();
+    private final String[] trackBankNames = new String[TRACK_COUNT];
+    private final String[][] trackPresetNames = new String[TRACK_COUNT][];
+    private final int[] trackPresetIndices = new int[TRACK_COUNT];
+    private final float[] trackVolumes = { 1f, 1f, 1f, 1f, 1f };
+    private final boolean[] trackEnabled = { true, true, true, true, true };
 
     private final Runnable statusUpdater = new Runnable() {
         @Override public void run() {
@@ -106,15 +127,220 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
         midiInput.start();
         handler.post(statusUpdater);
 
+        boolean restoredTrackOne = false;
+        for (int track = 0; track < TRACK_COUNT; ++track) {
+            String path = getPreferences(MODE_PRIVATE)
+                    .getString("track_" + track + "_path", null);
+            String name = getPreferences(MODE_PRIVATE)
+                    .getString("track_" + track + "_name", null);
+            if (path != null && new File(path).isFile()) {
+                loadBank(new File(path), track, false, name);
+                if (track == 0) restoredTrackOne = true;
+            }
+        }
         String lastPath = getPreferences(MODE_PRIVATE).getString("last_sf2_path", null);
-        if (lastPath != null && new File(lastPath).isFile()) {
-            loadBank(new File(lastPath), false);
+        if (!restoredTrackOne && lastPath != null && new File(lastPath).isFile()) {
+            loadBank(new File(lastPath), 0, false, new File(lastPath).getName());
         }
         String folderUri = getPreferences(MODE_PRIVATE).getString("sf2_folder_uri", null);
         if (folderUri != null) scanSoundFontFolder(Uri.parse(folderUri));
     }
 
     private void buildInterface() {
+        LinearLayout root = vertical();
+        root.setPadding(dp(14), dp(8), dp(14), dp(8));
+        root.setBackgroundColor(BG);
+
+        LinearLayout toolbar = horizontal();
+        TextView title = text("PALCO LEVE", 22, PRIMARY);
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        toolbar.addView(title, fixed(175));
+
+        engineStatus = text("Nenhum SF2 carregado", 11, SECONDARY);
+        engineStatus.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        toolbar.addView(engineStatus, weighted(1));
+
+        Button library = button("BIBLIOTECA", CARD, ACCENT);
+        library.setOnClickListener(v -> showLibraryMenu());
+        toolbar.addView(library, fixed(130));
+
+        Button panic = button("PÂNICO", Color.rgb(62, 31, 38), DANGER);
+        panic.setOnClickListener(v -> nativePanic());
+        toolbar.addView(panic, fixed(100));
+        root.addView(toolbar, matchWrap());
+
+        LinearLayout statusRow = horizontal();
+        midiStatus = pill("●  Procurando teclado MIDI", ACCENT);
+        statusRow.addView(midiStatus, weighted(1));
+        bankName = pill("0/5 tracks • biblioteca não configurada", SECONDARY);
+        bankName.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        statusRow.addView(bankName, weighted(1));
+        root.addView(statusRow, matchWrap());
+
+        LinearLayout workspace = horizontal();
+        LinearLayout trackList = vertical();
+        trackList.setPadding(0, dp(2), dp(8), 0);
+
+        for (int i = 0; i < TRACK_COUNT; ++i) {
+            final int track = i;
+            LinearLayout row = horizontal();
+            row.setPadding(dp(8), dp(3), dp(8), dp(3));
+            row.setBackground(rounded(CARD, 7));
+            row.setClickable(true);
+            row.setOnClickListener(v -> showBankPickerForTrack(track));
+            trackRows[i] = row;
+
+            View colorStrip = new View(this);
+            colorStrip.setBackgroundColor(i == 0 ? ACCENT : Color.rgb(70, 90, 107));
+            row.addView(colorStrip, new LinearLayout.LayoutParams(dp(5),
+                    LinearLayout.LayoutParams.MATCH_PARENT));
+
+            TextView number = text(String.format("%02d", i + 1), 14, SECONDARY);
+            number.setGravity(Gravity.CENTER);
+            row.addView(number, fixed(48));
+
+            LinearLayout names = vertical();
+            names.setPadding(dp(6), 0, dp(8), 0);
+            names.setClickable(true);
+            names.setOnClickListener(v -> showBankPickerForTrack(track));
+            trackBankLabels[i] = text("Clique para escolher um SoundFont", 14, PRIMARY);
+            trackPresetLabels[i] = text("Track vazia", 10, SECONDARY);
+            names.addView(trackBankLabels[i], matchWrap());
+            names.addView(trackPresetLabels[i], matchWrap());
+            row.addView(names, weighted(1.25f));
+
+            trackOnButtons[i] = new ToggleButton(this);
+            trackOnButtons[i].setTextOn("ON");
+            trackOnButtons[i].setTextOff("MUTE");
+            trackOnButtons[i].setTextColor(PRIMARY);
+            trackOnButtons[i].setBackground(rounded(Color.rgb(35, 47, 59), 6));
+            trackOnButtons[i].setOnCheckedChangeListener((button, checked) -> {
+                if (refreshingTrackUi) return;
+                trackEnabled[track] = checked;
+                nativeSetTrackEnabled(track, checked);
+            });
+            row.addView(trackOnButtons[i], fixed(68));
+
+            TextView level = text("VOL", 9, SECONDARY);
+            level.setGravity(Gravity.CENTER);
+            row.addView(level, fixed(34));
+
+            trackLevelBars[i] = new SeekBar(this);
+            trackLevelBars[i].setMax(100);
+            trackLevelBars[i].setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    if (refreshingTrackUi) return;
+                    trackVolumes[track] = progress / 100f;
+                    nativeSetTrackVolume(track, trackVolumes[track]);
+                }
+                @Override public void onStartTrackingTouch(SeekBar seekBar) { }
+                @Override public void onStopTrackingTouch(SeekBar seekBar) { }
+            });
+            row.addView(trackLevelBars[i], weighted(0.7f));
+
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
+            rowParams.setMargins(0, dp(3), 0, dp(3));
+            trackList.addView(row, rowParams);
+        }
+
+        LinearLayout inspector = vertical();
+        inspector.setPadding(dp(10), dp(8), dp(10), dp(8));
+        inspector.setBackground(rounded(Color.rgb(15, 22, 29), 8));
+
+        inspectorTitle = text("TRACK 01  •  INSPECTOR", 13, ACCENT);
+        inspector.addView(inspectorTitle, matchWrap());
+
+        TextView presetLabel = text("TIMBRE / PRESET", 9, SECONDARY);
+        inspector.addView(presetLabel, matchWrap());
+        presetSpinner = new Spinner(this);
+        presetSpinner.setBackground(rounded(CARD, 7));
+        presetSpinner.setPadding(dp(10), 0, dp(10), 0);
+        presetSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent,
+                                                  View view, int position, long id) {
+                if (presetsReady && !refreshingTrackUi) {
+                    trackPresetIndices[selectedTrack] = position;
+                    nativeSetPreset(selectedTrack, position);
+                    refreshTrackRows();
+                }
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+        });
+        LinearLayout.LayoutParams presetParams = matchWrap();
+        presetParams.height = dp(46);
+        inspector.addView(presetSpinner, presetParams);
+
+        LinearLayout transposeRow = horizontal();
+        Button down = button("−", CARD, PRIMARY);
+        down.setOnClickListener(v -> changeTranspose(-1));
+        transposeRow.addView(down, fixed(48));
+        transposeValue = pill("TRANSPOSE  0", ACCENT);
+        transposeValue.setGravity(Gravity.CENTER);
+        transposeRow.addView(transposeValue, weighted(1));
+        Button up = button("+", CARD, PRIMARY);
+        up.setOnClickListener(v -> changeTranspose(1));
+        transposeRow.addView(up, fixed(48));
+        inspector.addView(transposeRow, matchWrap());
+
+        LinearLayout masterRow = horizontal();
+        TextView masterLabel = text("MASTER", 9, SECONDARY);
+        masterLabel.setGravity(Gravity.CENTER);
+        masterRow.addView(masterLabel, fixed(62));
+        SeekBar master = new SeekBar(this);
+        master.setMax(120);
+        master.setProgress(80);
+        master.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                currentVolume = progress / 100f;
+                nativeSetVolume(currentVolume);
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { }
+        });
+        masterRow.addView(master, weighted(1));
+        inspector.addView(masterRow, matchWrap());
+
+        Button test = button("SEGURE PARA TESTAR C4", CARD, PRIMARY);
+        test.setOnTouchListener((view, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                nativeNoteOn(0, clampMidi(60 + transpose), 105);
+                return true;
+            }
+            if (event.getActionMasked() == MotionEvent.ACTION_UP
+                    || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                nativeNoteOff(0, clampMidi(60 + transpose));
+                view.performClick();
+                return true;
+            }
+            return true;
+        });
+        inspector.addView(test, matchWrap());
+
+        demoButton = button("OUVIR HINO", CARD, ACCENT);
+        demoButton.setOnClickListener(v -> toggleHymnDemo());
+        inspector.addView(demoButton, matchWrap());
+
+        audioButton = button("INICIAR ÁUDIO", ACCENT, Color.rgb(7, 35, 29));
+        audioButton.setOnClickListener(v -> toggleAudio());
+        inspector.addView(audioButton, matchWrap());
+
+        LinearLayout.LayoutParams tracksParams = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.MATCH_PARENT, 2.1f);
+        LinearLayout.LayoutParams inspectorParams = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.MATCH_PARENT, 1f);
+        workspace.addView(trackList, tracksParams);
+        workspace.addView(inspector, inspectorParams);
+        LinearLayout.LayoutParams workspaceParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
+        root.addView(workspace, workspaceParams);
+
+        setContentView(root);
+        selectTrack(0);
+    }
+
+    @SuppressWarnings("unused")
+    private void buildLegacyInterface() {
         LinearLayout root = vertical();
         root.setPadding(dp(24), dp(16), dp(24), dp(16));
         root.setBackgroundColor(BG);
@@ -136,6 +362,20 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
         connection.addView(bankName, weighted(1));
         root.addView(connection, matchWrap());
 
+        LinearLayout tracks = horizontal();
+        TextView tracksLabel = pill("CAMADAS", SECONDARY);
+        tracksLabel.setGravity(Gravity.CENTER);
+        tracks.addView(tracksLabel, fixed(100));
+        for (int i = 0; i < TRACK_COUNT; ++i) {
+            final int track = i;
+            trackButtons[i] = button((i + 1) + "  +", CARD, PRIMARY);
+            trackButtons[i].setOnClickListener(v -> selectTrack(track));
+            LinearLayout.LayoutParams params = weighted(1);
+            params.setMargins(dp(3), dp(4), dp(3), dp(4));
+            tracks.addView(trackButtons[i], params);
+        }
+        root.addView(tracks, matchWrap());
+
         LinearLayout bankRow = horizontal();
         Button load = button("SF2 avulso", ACCENT, Color.rgb(7, 35, 29));
         load.setOnClickListener(v -> chooseSoundFont());
@@ -151,9 +391,13 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
         bankSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(android.widget.AdapterView<?> parent,
                                                   View view, int position, long id) {
+                if (suppressBankSelection) {
+                    suppressBankSelection = false;
+                    return;
+                }
                 if (!banksReady || position <= 0 || position > folderBanks.size()) return;
                 SoundFontEntry selected = folderBanks.get(position - 1);
-                importSoundFont(selected.uri, selected.name);
+                importSoundFont(selected.uri, selected.name, selectedTrack);
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
         });
@@ -178,7 +422,10 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
         presetSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(android.widget.AdapterView<?> parent,
                                                   View view, int position, long id) {
-                if (presetsReady) nativeSetPreset(position);
+                if (presetsReady && !refreshingTrackUi) {
+                    trackPresetIndices[selectedTrack] = position;
+                    nativeSetPreset(selectedTrack, position);
+                }
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
         });
@@ -186,6 +433,35 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
         spinnerParams.height = dp(48);
         spinnerParams.setMargins(dp(10), dp(5), 0, dp(5));
         presetRow.addView(presetSpinner, spinnerParams);
+
+        trackToggle = new ToggleButton(this);
+        trackToggle.setTextOn("CAMADA ON");
+        trackToggle.setTextOff("CAMADA OFF");
+        trackToggle.setTextColor(PRIMARY);
+        trackToggle.setBackground(rounded(CARD, 12));
+        trackToggle.setOnCheckedChangeListener((button, checked) -> {
+            if (refreshingTrackUi) return;
+            trackEnabled[selectedTrack] = checked;
+            nativeSetTrackEnabled(selectedTrack, checked);
+        });
+        presetRow.addView(trackToggle, fixed(120));
+
+        TextView trackVolumeLabel = text("NÍVEL", 10, SECONDARY);
+        trackVolumeLabel.setGravity(Gravity.CENTER);
+        presetRow.addView(trackVolumeLabel, fixed(45));
+
+        trackVolumeSeek = new SeekBar(this);
+        trackVolumeSeek.setMax(100);
+        trackVolumeSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (refreshingTrackUi) return;
+                trackVolumes[selectedTrack] = progress / 100f;
+                nativeSetTrackVolume(selectedTrack, trackVolumes[selectedTrack]);
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { }
+        });
+        presetRow.addView(trackVolumeSeek, weighted(0.45f));
         root.addView(presetRow, matchWrap());
 
         LinearLayout controls = horizontal();
@@ -262,13 +538,14 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
         root.addView(performance, matchWrap());
 
         TextView footer = text(
-                "Offline • um SF2 por vez • saída com fio recomendada • sem gravação",
+                "Offline • até 5 SF2 simultâneos • ganho protegido • saída com fio recomendada",
                 11, SECONDARY);
         footer.setGravity(Gravity.CENTER);
         footer.setPadding(0, dp(8), 0, 0);
         root.addView(footer, matchWrap());
 
         setContentView(root);
+        selectTrack(0);
     }
 
     private void chooseSoundFont() {
@@ -278,6 +555,49 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
         intent.putExtra(Intent.EXTRA_MIME_TYPES,
                 new String[] { "audio/sf2", "application/octet-stream", "*/*" });
         startActivityForResult(intent, PICK_SF2);
+    }
+
+    private void showLibraryMenu() {
+        String[] actions = {
+                "Escolher pasta de SoundFonts",
+                "Importar SF2 avulso para a track " + (selectedTrack + 1)
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("Biblioteca")
+                .setItems(actions, (dialog, which) -> {
+                    if (which == 0) chooseSoundFontFolder();
+                    else chooseSoundFont();
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
+    }
+
+    private void showBankPickerForTrack(int track) {
+        selectTrack(track);
+        if (folderBanks.isEmpty()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Track " + (track + 1))
+                    .setMessage("Configure uma pasta de SoundFonts na Biblioteca primeiro.")
+                    .setPositiveButton("Abrir Biblioteca", (dialog, which) -> showLibraryMenu())
+                    .setNegativeButton("Cancelar", null)
+                    .show();
+            return;
+        }
+        String[] names = new String[folderBanks.size()];
+        int checked = -1;
+        for (int i = 0; i < folderBanks.size(); ++i) {
+            names[i] = folderBanks.get(i).name;
+            if (names[i].equals(trackBankNames[track])) checked = i;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Track " + (track + 1) + " • SoundFont")
+                .setSingleChoiceItems(names, checked, (dialog, which) -> {
+                    SoundFontEntry selected = folderBanks.get(which);
+                    dialog.dismiss();
+                    importSoundFont(selected.uri, selected.name, track);
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
     }
 
     private void chooseSoundFontFolder() {
@@ -295,7 +615,7 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
         Uri uri = data.getData();
         if (uri == null) return;
         if (requestCode == PICK_SF2) {
-            importSoundFont(uri);
+            importSoundFont(uri, selectedTrack);
         } else if (requestCode == PICK_SF2_FOLDER) {
             int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION
                     | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
@@ -308,13 +628,15 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
         }
     }
 
-    private void importSoundFont(Uri uri) {
-        importSoundFont(uri, queryName(uri));
+    private void importSoundFont(Uri uri, int track) {
+        importSoundFont(uri, queryName(uri), track);
     }
 
-    private void importSoundFont(Uri uri, String sourceName) {
+    private void importSoundFont(Uri uri, String sourceName, int track) {
+        final int targetTrack = track;
         String displayName = sourceName;
         if (!displayName.toLowerCase().endsWith(".sf2")) displayName += ".sf2";
+        final String resolvedDisplayName = displayName;
         String safeName = displayName.replaceAll("[^A-Za-z0-9._ -]", "_");
         File directory = getExternalFilesDir("soundfonts");
         if (directory == null) {
@@ -322,7 +644,7 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
             return;
         }
         File destination = new File(directory, safeName);
-        engineStatus.setText("Importando " + displayName + "…");
+        engineStatus.setText("Importando camada " + (targetTrack + 1) + "…");
 
         worker.execute(() -> {
             try (InputStream input = getContentResolver().openInputStream(uri);
@@ -331,7 +653,7 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
                 byte[] buffer = new byte[64 * 1024];
                 int read;
                 while ((read = input.read(buffer)) >= 0) output.write(buffer, 0, read);
-                loadBank(destination, true);
+                loadBank(destination, targetTrack, true, resolvedDisplayName);
             } catch (Exception error) {
                 runOnUiThread(() -> engineStatus.setText("Falha ao importar: " + error.getMessage()));
             }
@@ -383,43 +705,93 @@ public final class MainActivity extends Activity implements MidiInputManager.Lis
     private void showFolderBanks(List<SoundFontEntry> found) {
         folderBanks.clear();
         folderBanks.addAll(found);
-        List<String> labels = new ArrayList<>();
-        labels.add(found.isEmpty() ? "Nenhum SF2 nesta pasta" : "Escolha um banco (" + found.size() + ")");
-        for (SoundFontEntry entry : found) labels.add(entry.name);
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_item, labels);
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        bankSpinner.setAdapter(adapter);
         banksReady = true;
-        bankName.setText(found.size() + " bancos disponíveis");
+        refreshSelectedTrack();
+        updateTrackSummary();
     }
 
-    private void loadBank(File file, boolean alreadyOnWorker) {
+    private void loadBank(File file, int track, boolean alreadyOnWorker, String displayName) {
+        final String resolvedName = displayName == null ? file.getName() : displayName;
         Runnable task = () -> {
             runOnUiThread(() -> {
                 presetsReady = false;
-                bankName.setText("Banco: " + file.getName());
-                engineStatus.setText("Carregando SF2…");
+                engineStatus.setText("Carregando camada " + (track + 1) + "…");
             });
-            int count = nativeLoadSoundFont(file.getAbsolutePath());
-            String[] names = count > 0 ? nativeGetPresetNames() : new String[0];
+            int count = nativeLoadSoundFont(track, file.getAbsolutePath());
+            String[] names = count > 0 ? nativeGetPresetNames(track) : new String[0];
             runOnUiThread(() -> {
                 if (count <= 0) {
                     engineStatus.setText(nativeGetStatus());
                     return;
                 }
-                ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
-                        android.R.layout.simple_spinner_item, names);
-                adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-                presetSpinner.setAdapter(adapter);
-                presetsReady = true;
+                trackBankNames[track] = resolvedName;
+                trackPresetNames[track] = names;
+                trackPresetIndices[track] = 0;
                 nativeSetVolume(currentVolume);
+                nativeSetTrackVolume(track, trackVolumes[track]);
+                nativeSetTrackEnabled(track, trackEnabled[track]);
                 getPreferences(MODE_PRIVATE).edit()
-                        .putString("last_sf2_path", file.getAbsolutePath()).apply();
+                        .putString("track_" + track + "_path", file.getAbsolutePath())
+                        .putString("track_" + track + "_name", resolvedName)
+                        .putString("last_sf2_path", track == 0 ? file.getAbsolutePath()
+                                : getPreferences(MODE_PRIVATE).getString("last_sf2_path", null))
+                        .apply();
+                if (selectedTrack == track) refreshSelectedTrack();
+                updateTrackSummary();
                 startAudio();
             });
         };
         if (alreadyOnWorker) task.run(); else worker.execute(task);
+    }
+
+    private void selectTrack(int track) {
+        selectedTrack = Math.max(0, Math.min(TRACK_COUNT - 1, track));
+        refreshSelectedTrack();
+    }
+
+    private void refreshSelectedTrack() {
+        refreshingTrackUi = true;
+        refreshTrackRows();
+        inspectorTitle.setText(String.format("TRACK %02d  •  INSPECTOR", selectedTrack + 1));
+
+        String[] names = trackPresetNames[selectedTrack];
+        String[] shown = names == null || names.length == 0
+                ? new String[] { "Escolha um SF2 para esta camada" } : names;
+        ArrayAdapter<String> presetAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, shown);
+        presetAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        presetSpinner.setAdapter(presetAdapter);
+        presetsReady = names != null && names.length > 0;
+        if (presetsReady) {
+            presetSpinner.setSelection(Math.min(trackPresetIndices[selectedTrack], names.length - 1), false);
+        }
+        refreshingTrackUi = false;
+    }
+
+    private void refreshTrackRows() {
+        for (int i = 0; i < TRACK_COUNT; ++i) {
+            boolean selected = i == selectedTrack;
+            trackRows[i].setBackground(rounded(
+                    selected ? Color.rgb(27, 53, 60) : CARD, 7));
+            String bank = trackBankNames[i];
+            trackBankLabels[i].setText(bank == null
+                    ? "Clique para escolher um SoundFont" : bank.replace(".sf2", ""));
+            String[] presets = trackPresetNames[i];
+            if (presets == null || presets.length == 0) {
+                trackPresetLabels[i].setText("Track vazia");
+            } else {
+                int preset = Math.min(trackPresetIndices[i], presets.length - 1);
+                trackPresetLabels[i].setText(presets[preset]);
+            }
+            trackOnButtons[i].setChecked(trackEnabled[i]);
+            trackLevelBars[i].setProgress(Math.round(trackVolumes[i] * 100f));
+        }
+    }
+
+    private void updateTrackSummary() {
+        int loaded = 0;
+        for (String name : trackBankNames) if (name != null) ++loaded;
+        bankName.setText(loaded + "/5 tracks • " + folderBanks.size() + " SoundFonts");
     }
 
     private void toggleAudio() {

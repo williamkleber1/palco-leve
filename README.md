@@ -9,7 +9,9 @@ O objetivo é iniciar rápido, manter baixa latência e oferecer somente os cont
 - motor nativo AAudio;
 - sintetizador SF2 com TinySoundFont;
 - teclado USB/Bluetooth MIDI pela API MIDI do Android;
-- seletor de banco e preset;
+- cinco camadas simultâneas, cada uma com banco, preset, volume e liga/desliga;
+- interface em tracks inspirada em DAWs, com seleção do SF2 ao tocar na track;
+- gerenciamento de pasta e importação concentrado no menu Biblioteca;
 - catálogo de SF2 de uma pasta autorizada, incluindo a pasta do Audio Evolution;
 - transpose, volume, sustain e pânico;
 - demonstração musical com um spiritual tradicional em domínio público;
@@ -18,7 +20,7 @@ O objetivo é iniciar rápido, manter baixa latência e oferecer somente os cont
 
 ## Princípios técnicos
 
-- uma SoundFont carregada por vez para limitar o uso de RAM;
+- até cinco SoundFonts carregadas, com 32 vozes por camada e ganho normalizado;
 - callback de áudio nativo sem alocações, bloqueios ou acesso a disco;
 - fila MIDI sem bloqueio no lado do áudio;
 - stream AAudio de baixa latência, com modo exclusivo e fallback compartilhado;
@@ -34,7 +36,7 @@ durante o desenvolvimento, instale Android SDK 35, Build Tools 35.0.0, NDK
 ./build-manual.sh
 ```
 
-O APK assinado para testes locais será criado em `dist/Palco-Leve-0.3.0.apk`.
+O APK assinado para testes locais será criado em `dist/Palco-Leve-0.5.0.apk`.
 A chave gerada é apenas de desenvolvimento e fica fora do Git.
 
 Os resultados dos testes em hardware ficam em
